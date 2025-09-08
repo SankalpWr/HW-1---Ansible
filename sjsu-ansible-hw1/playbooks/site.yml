@@ -1,0 +1,91 @@
+---
+- name: Deploy webservers on port 8080
+  hosts: web
+  become: true
+  tags: ["deploy"]
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Ensure web root exists
+      file:
+        path: /var/www/html
+        state: directory
+        mode: "0755"
+
+    - name: Create index.html with host-specific message
+      template:
+        src: ../templates/index.html.j2
+        dest: /var/www/html/index.html
+        mode: "0644"
+
+    - name: Deploy nginx 8080 site
+      template:
+        src: ../templates/nginx-site.j2
+        dest: /etc/nginx/sites-available/web_8080
+        mode: "0644"
+
+    - name: Disable default site (if present)
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Enable 8080 site
+      file:
+        src: /etc/nginx/sites-available/web_8080
+        dest: /etc/nginx/sites-enabled/web_8080
+        state: link
+
+    - name: Validate nginx config
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+
+    - name: Ensure nginx running and enabled
+      service:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+- name: Un-deploy webservers (remove nginx and site)
+  hosts: web
+  become: true
+  tags: ["undeploy"]
+  tasks:
+    - name: Stop nginx
+      service:
+        name: nginx
+        state: stopped
+        enabled: no
+
+    - name: Remove site symlink
+      file:
+        path: /etc/nginx/sites-enabled/web_8080
+        state: absent
+
+    - name: Remove site file
+      file:
+        path: /etc/nginx/sites-available/web_8080
+        state: absent
+
+    - name: Remove index.html
+      file:
+        path: /var/www/html/index.html
+        state: absent
+
+    - name: Remove nginx completely
+      apt:
+        name: nginx
+        state: absent
+        purge: yes
+
+    - name: Autoremove leftover packages
+      apt:
+        autoremove: yes
